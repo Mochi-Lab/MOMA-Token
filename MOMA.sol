@@ -29,6 +29,7 @@ contract MOMA is ERC20PresetMinterPauser, ReentrancyGuard {
 
     mapping(address => VestingInfo) private _vestingList;
 
+    bytes32 public constant LOCKER_ROLE = keccak256("LOCKER_ROLE");
     uint256 public constant INITIAL_SUPPLY = 5000000 * DECIMAL_MULTIPLIER;
     uint256 public constant MAX_SUPPLY = 100000000 * DECIMAL_MULTIPLIER;
     uint256 public constant DECIMAL_MULTIPLIER = 10**18;
@@ -45,9 +46,21 @@ contract MOMA is ERC20PresetMinterPauser, ReentrancyGuard {
         _;
     }
 
-    constructor() public ERC20PresetMinterPauser("MOchi MArket", "MOMA") {
-        _blacklistEffectiveEndtime = block.timestamp + BLACKLIST_EFFECTIVE_DURATION;
+    modifier onlyLocker() {
+        require(hasRole(LOCKER_ROLE, _msgSender()), "MOMA: LOCKER role required");
+        _;
+    }
+
+    constructor(address multiSigAccount) public ERC20PresetMinterPauser("MOchi MArket", "MOMA") {
+        _blacklistEffectiveEndtime = block.timestamp.add(BLACKLIST_EFFECTIVE_DURATION);
         _mint(_msgSender(), INITIAL_SUPPLY);
+        _setupRole(DEFAULT_ADMIN_ROLE, multiSigAccount);
+        _setupRole(MINTER_ROLE, multiSigAccount);
+        _setupRole(PAUSER_ROLE, multiSigAccount);
+        _setupRole(LOCKER_ROLE, _msgSender());
+        renounceRole(DEFAULT_ADMIN_ROLE, _msgSender());
+        renounceRole(MINTER_ROLE, _msgSender());
+        renounceRole(PAUSER_ROLE, _msgSender());
     }
 
     function mint(address to, uint256 amount) public virtual override onlyMinter {
@@ -63,12 +76,12 @@ contract MOMA is ERC20PresetMinterPauser, ReentrancyGuard {
         return _blacklist[user];
     }
 
-    function addToBlacklist(address user) external onlyAdmin {
+    function addToBlacklist(address user) external onlyLocker {
         require(block.timestamp < _blacklistEffectiveEndtime, "MOMA: Force lock time ended");
         _blacklist[user] = BlacklistInfo(true, block.timestamp, balanceOf(user));
     }
 
-    function removeFromBlacklist(address user) external onlyAdmin {
+    function removeFromBlacklist(address user) external onlyLocker {
         _blacklist[user].locked = false;
     }
 
@@ -176,10 +189,10 @@ contract MOMA is ERC20PresetMinterPauser, ReentrancyGuard {
         }
     }
 
-    function withdrawERC20(address token, uint256 amount) public onlyAdmin {
+    function withdrawERC20(address token, uint256 amount) external onlyAdmin {
         require(amount > 0, "MOMA: Amount must be greater than 0");
         require(IERC20(token).balanceOf(address(this)) >= amount, "MOMA: ERC20 not enough balance");
-        IERC20(token).transfer(_msgSender(), amount);
+        require(IERC20(token).transfer(_msgSender(), amount), "MOMA: transfer ERC20 failed");
     }
 
     receive() external payable {
